@@ -217,6 +217,12 @@ class UrlGenerator implements UrlGeneratorContract
             return $path;
         }
 
+        // Check if ASSET_URL is set, use it if available
+        if (env('ASSET_URL')) {
+            $root = rtrim(env('ASSET_URL'), '/');
+            return $root.'/'.trim($path, '/');
+        }
+
         // Once we get the root URL, we will check to see if it contains an index.php
         // file in the paths. If it does, we will remove it since it is not needed
         // for asset paths, but only for routes to endpoints in the application.

@@ -74,6 +74,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Application Asset URL
+    |--------------------------------------------------------------------------
+    |
+    | This URL is used to properly generate URLs for assets, including
+    | stylesheets, JavaScripts, images, and other files. You should set 
+    | this explicitly to ensure assets load correctly from subdirectories.
+    |
+    */
+    
+    'asset_url' => env('ASSET_URL', null),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

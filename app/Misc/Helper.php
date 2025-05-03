@@ -2229,4 +2229,18 @@ class Helper
     {
         return (stripos($text, $string) === 0);
     }
+
+    /**
+     * Generate an asset path for the application with full absolute URL including subdirectory.
+     *
+     * @param  string  $path
+     * @param  bool    $secure
+     * @return string
+     */
+    public static function asset($path, $secure = null)
+    {
+        // Always use the full APP_URL with path
+        $baseUrl = rtrim(config('app.url'), '/');
+        return $baseUrl . '/' . ltrim($path, '/');
+    }
 }
