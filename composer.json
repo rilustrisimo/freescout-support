@@ -498,6 +498,9 @@
         "pre-install-cmd": [
             "@php -r \"@mkdir('vendor/natxet/cssmin/src', 775);\""
         ],
+        "pre-update-cmd": [
+            "@php -r \"@mkdir('vendor/rap2hpoutre/laravel-log-viewer/src/controllers', 0775, true);\""
+        ],
         "post-install-cmd": [
             "@php -r \"@mkdir('vendor/rap2hpoutre/laravel-log-viewer/src/controllers', 0775, true);\""
         ],
