@@ -71,6 +71,27 @@ class ClearCache extends Command
         if (!$this->option('doNotGenerateVars')) {
             $this->call('freescout:generate-vars');
         }
+
+        try {
+            \Artisan::call('freescout:generate-vars');
+            if (!$this->option('doNotGenerateVars')) {
+                $this->info('Created: storage/app/public/js/vars.js');
+                
+                // If symlinks are disabled, run our sync command to ensure files are copied
+                if (function_exists('symlink')) {
+                    try {
+                        @symlink('test', 'test_symlink');
+                        @unlink('test_symlink');
+                    } catch (\Exception $e) {
+                        // Symlinks are disabled, run our sync command
+                        \Artisan::call('freescout:sync-storage-files');
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            $this->error('Error generating JS vars: '.$e->getMessage());
+        }
+
         // This should not be done during installation.
         if (\Helper::isInstalled()) {
             \Helper::queueWorkerRestart();

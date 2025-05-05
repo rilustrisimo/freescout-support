@@ -37,6 +37,11 @@ class Kernel extends ConsoleKernel
             return;
         }
 
+        // Run the storage sync for environments where symlinks are disabled
+        $schedule->command('freescout:sync-storage-files')
+            ->everyFifteenMinutes()
+            ->withoutOverlapping();
+
         // Remove failed jobs
         $schedule->command('queue:flush')
             ->weekly();
