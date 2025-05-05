@@ -121,6 +121,9 @@ Route::post('/system/action', ['uses' => 'SystemController@action', 'middleware'
 Route::get('/system/cron/{hash}', ['uses' => 'SystemController@cron'])->name('system.cron');
 Route::get('/system/ajax-html/{action}/{param?}', ['uses' => 'SystemController@ajaxHtml', 'middleware' => ['auth', 'roles'], 'roles' => ['admin']])->name('system.ajax_html');
 
+// Cache clearing route for environments without CLI access (like Hostinger)
+Route::get('/clear-cache', ['uses' => 'SystemController@clearCache', 'middleware' => ['auth', 'roles'], 'roles' => ['admin']])->name('system.clear_cache');
+
 // Open tracking
 Route::get('/thread/read/{conversation_id}/{thread_id}', 'OpenController@setThreadAsRead')->name('open_tracking.set_read');
 

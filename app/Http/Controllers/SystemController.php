@@ -414,4 +414,40 @@ class SystemController extends Controller
 
         abort(404);
     }
+
+    /**
+     * Clear various application caches.
+     * This is particularly useful for hosting providers without CLI access.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function clearCache()
+    {
+        $outputLog = new BufferedOutput();
+        
+        try {
+            // Use FreeScout's built-in clear cache command
+            \Artisan::call('freescout:clear-cache', [], $outputLog);
+            
+            // Additional cache clearing that might be needed
+            \Artisan::call('optimize:clear', [], $outputLog);
+            \Artisan::call('view:clear', [], $outputLog);
+            
+            $output = $outputLog->fetch();
+            
+            \Session::flash('flash_success_floating', __('Cache cleared successfully!'));
+            
+            // Retrieve any errors from the output
+            if (strpos(strtolower($output), 'error') !== false) {
+                \Session::flash('flash_error_floating', $output);
+            }
+            
+        } catch (\Exception $e) {
+            \Helper::logException($e);
+            \Session::flash('flash_error_floating', __('Error clearing cache: ').$e->getMessage());
+        }
+
+        // Redirect back to the previous page
+        return redirect()->back();
+    }
 }
