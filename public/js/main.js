@@ -25,6 +25,21 @@ var fs_checkbox_shift_last_checked = null;
 
 var FS_STATUS_CLOSED = 3;
 
+// Ensure viewMailboxInit is always available
+if (typeof viewMailboxInit !== 'function') {
+    window.viewMailboxInit = function() {
+        if (typeof conversationPagination === 'function') {
+            conversationPagination();
+        }
+        if (typeof starConversationInit === 'function') {
+            starConversationInit();
+        }
+        if (typeof initMailboxToolbar === 'function') {
+            initMailboxToolbar();
+        }
+    };
+}
+
 // Ajax based notifications;
 var poly;
 // List of funcions preparin data for polycast receive request

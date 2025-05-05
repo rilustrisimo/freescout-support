@@ -429,9 +429,11 @@ class SystemController extends Controller
             // Use FreeScout's built-in clear cache command
             \Artisan::call('freescout:clear-cache', [], $outputLog);
             
-            // Additional cache clearing that might be needed
-            \Artisan::call('optimize:clear', [], $outputLog);
+            // Additional cache clearing commands that exist in Laravel 5.5
+            \Artisan::call('cache:clear', [], $outputLog);
             \Artisan::call('view:clear', [], $outputLog);
+            \Artisan::call('config:clear', [], $outputLog);
+            \Artisan::call('route:clear', [], $outputLog);
             
             $output = $outputLog->fetch();
             
