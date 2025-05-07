@@ -133,3 +133,5 @@ Route::post('/uploads/upload', ['uses' => 'SecureController@upload', 'laroute' =
 // API Command endpoints - Secure API endpoints for external cronjobs
 Route::get('/api/command/storage-sync/{hash}', ['uses' => 'ApiCommandController@storageSync'])->name('api.command.storage_sync');
 Route::get('/api/command/schedule/{hash}', ['uses' => 'ApiCommandController@schedule'])->name('api.command.schedule');
+Route::get('/api/command/fetch-emails/{hash}', ['uses' => 'ApiCommandController@fetchEmails'])->name('api.command.fetch_emails');
+Route::get('/api/command/fetch-emails-debug/{hash}', ['uses' => 'ApiCommandController@fetchEmailsDebug'])->name('api.command.fetch_emails_debug');
