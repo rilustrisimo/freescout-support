@@ -129,3 +129,7 @@ Route::get('/thread/read/{conversation_id}/{thread_id}', 'OpenController@setThre
 
 // Uploads
 Route::post('/uploads/upload', ['uses' => 'SecureController@upload', 'laroute' => true])->name('uploads.upload');
+
+// API Command endpoints - Secure API endpoints for external cronjobs
+Route::get('/api/command/storage-sync/{hash}', ['uses' => 'ApiCommandController@storageSync'])->name('api.command.storage_sync');
+Route::get('/api/command/schedule/{hash}', ['uses' => 'ApiCommandController@schedule'])->name('api.command.schedule');

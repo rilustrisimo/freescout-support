@@ -2231,6 +2231,17 @@ class Helper
     }
 
     /**
+     * Generate hash for secure API command endpoints
+     * 
+     * @param string $action Command action to generate specific hash for
+     * @return string
+     */
+    public static function getApiCommandHash($action = '')
+    {
+        return md5(config('app.key').'api_command_'.$action.'_hash');
+    }
+
+    /**
      * Generate an asset path for the application with full absolute URL including subdirectory.
      *
      * @param  string  $path
