@@ -165,8 +165,11 @@ class ApiCommandController extends Controller
             abort(404);
         }
         
+        $output = [];
+        
         // Restart queue worker to clear any locks
         Helper::queueWorkerRestart();
+        $output[] = "Cache cleared for queue workers to restart";
         
         // Remove any stuck queue mutex
         try {
@@ -177,17 +180,20 @@ class ApiCommandController extends Controller
             
             if ($queue_mutex_name && \Cache::has($queue_mutex_name)) {
                 \Cache::forget($queue_mutex_name);
+                $output[] = "Removed stuck mutex: {$queue_mutex_name}";
             }
         } catch (\Exception $e) {
-            // Command may not exist, continue anyway
+            $output[] = "Note: freescout:get-queue-mutex command not available";
         }
         
-        // Kill any existing queue processes to start fresh
+        // Check for running processes
         if (function_exists('shell_exec')) {
             $worker_pids = Helper::getRunningProcesses();
             if (count($worker_pids) > 0) {
+                $output[] = "Found running queue worker processes: " . implode(', ', $worker_pids);
                 shell_exec('kill '.implode(' | kill ', $worker_pids));
                 sleep(1); // Give processes time to terminate
+                $output[] = "Terminated existing queue worker processes";
             }
         }
         
@@ -198,12 +204,44 @@ class ApiCommandController extends Controller
         }
         
         // Add identifier to avoid conflicts
-        $queue_work_params['--queue'] .= ','.Helper::getWorkerIdentifier();
+        $queue_param = $queue_work_params['--queue'] ?? 'default';
+        $queue_param .= ','.Helper::getWorkerIdentifier();
+        $queue_work_params['--queue'] = $queue_param;
         
-        $outputLog = new BufferedOutput();
-        Artisan::call('queue:work', $queue_work_params, $outputLog);
-        $output = $outputLog->fetch();
+        // Build the command with all parameters
+        $command = 'php '.base_path().'/artisan queue:work';
+        foreach ($queue_work_params as $key => $value) {
+            $command .= ' '.$key.'='.$value;
+        }
+        $command .= ' > '.storage_path().'/logs/queue-jobs.log 2>&1 &';
         
-        return response($output, 200)->header('Content-Type', 'text/plain');
+        // Format command for display
+        $display_command = 'Running command: /opt/alt/php81/usr/bin/php artisan queue:work';
+        foreach ($queue_work_params as $key => $value) {
+            $display_command .= ' '.$key.'='.$value;
+        }
+        $display_command .= ' > '.storage_path().'/logs/queue-jobs.log 2>&1';
+        $output[] = $display_command;
+        
+        // Execute command
+        if (function_exists('shell_exec')) {
+            shell_exec($command);
+            $output[] = "Queue worker started in background";
+            
+            // Set option to record last run time
+            \App\Option::set('queue_work_last_run', time());
+            \App\Option::set('queue_work_last_successful_run', time());
+        } else {
+            $output[] = "Error: shell_exec function is disabled, cannot start queue worker";
+        }
+        
+        // Get current queue status
+        $queued_jobs_count = \App\Job::count();
+        $failed_jobs_count = \App\FailedJob::count();
+        $output[] = "\nQueue Status:";
+        $output[] = "- Jobs waiting in queue: {$queued_jobs_count}";
+        $output[] = "- Failed jobs: {$failed_jobs_count}";
+        
+        return response(implode("\n", $output), 200)->header('Content-Type', 'text/plain');
     }
 }
