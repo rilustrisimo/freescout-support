@@ -52,7 +52,7 @@ class ApiCommandController extends Controller
     }
 
     /**
-     * Run schedule command via API with enhanced logging and force execution
+     * Run schedule command via API with intelligent queue worker management
      */
     public function schedule(Request $request)
     {
@@ -60,35 +60,60 @@ class ApiCommandController extends Controller
             abort(404);
         }
         
+        $output_lines = [];
+        $output_lines[] = "Running FreeScout scheduler via API endpoint";
+        
         // Reset various mutex locks that might prevent scheduled tasks from running
         $fetch_mutex_name = \Cache::get('fetch_mutex_name');
         if ($fetch_mutex_name) {
             \Cache::forget($fetch_mutex_name);
+            $output_lines[] = "Cleared fetch email mutex lock";
         }
         
-        // Fix queue worker mutex issues by clearing any stuck locks
+        // Check for running queue workers before attempting to start new ones
+        $worker_identifier = Helper::getWorkerIdentifier();
+        $running_queue_workers = 0;
+        $worker_pids = [];
+        
         if (function_exists('shell_exec')) {
-            $queue_mutex_name = '';
             try {
-                // Get queue mutex name the same way the kernel does
-                $outputLog = new BufferedOutput();
-                Artisan::call('freescout:get-queue-mutex', [], $outputLog);
-                $queue_mutex_name = trim($outputLog->fetch());
-                
-                if ($queue_mutex_name && \Cache::has($queue_mutex_name)) {
-                    \Cache::forget($queue_mutex_name);
+                $processes = preg_split("/[\r\n]/", Helper::shellExec("ps auxww | grep '{$worker_identifier}'"));
+                foreach ($processes as $process) {
+                    $process = trim($process);
+                    preg_match("/^[\S]+\s+([\d]+)\s+/", $process, $m);
+                    if (empty($m)) {
+                        preg_match("/^([\d]+)\s+[\S]+\s+/", $process, $m);
+                    }
+                    if (!preg_match("/(sh \-c|grep )/", $process) && !empty($m[1])) {
+                        $running_queue_workers++;
+                        $worker_pids[] = $m[1];
+                    }
                 }
             } catch (\Exception $e) {
-                // Command may not exist, continue anyway
+                // Continue anyway
             }
             
-            // Restart queue worker
-            Helper::queueWorkerRestart();
+            if ($running_queue_workers > 1) {
+                $output_lines[] = "Detected {$running_queue_workers} queue workers - restarting to prevent conflicts";
+                Helper::queueWorkerRestart();
+                sleep(1);
+                
+                // Check if processes are still running after sending restart signal
+                $remaining_pids = Helper::getRunningProcesses($worker_identifier);
+                if (count($remaining_pids) > 0) {
+                    $output_lines[] = "Terminating remaining queue workers: " . implode(', ', $remaining_pids);
+                    shell_exec('kill ' . implode(' ', $remaining_pids) . ' 2>/dev/null');
+                    sleep(1);
+                    $running_queue_workers = 0;
+                }
+            } elseif ($running_queue_workers == 1) {
+                $output_lines[] = "Queue worker already running (PID: " . implode(', ', $worker_pids) . ")";
+                
+                // Update timestamp so it doesn't appear stalled in system status
+                Option::set('queue_work_last_run', time());
+                Option::set('queue_work_last_successful_run', time());
+            }
         }
-        
-        // Set the last run time to 1 hour ago to force all scheduled commands to check if they need to run
-        Option::set('queue_work_last_run', time() - 3600);
-        Option::set('freescout_fetch_emails_last_run', time() - 3600);
         
         // Now run the scheduler
         $outputLog = new BufferedOutput();
@@ -96,34 +121,47 @@ class ApiCommandController extends Controller
         Artisan::call('schedule:run', [], $outputLog);
         $output = $outputLog->fetch();
         
-        // Fix queue workers if needed
-        if (strpos($output, 'No scheduled commands are ready to run') !== false) {
-            // If no commands ran, try to start the queue worker directly
-            try {
+        // If we have output from the scheduler, add it to our output lines
+        if ($output && trim($output) != 'No scheduled commands are ready to run.') {
+            $output_lines[] = "\nScheduler output:";
+            $output_lines[] = $output;
+        } else {
+            $output_lines[] = "No scheduled commands were ready to run";
+            
+            // Only start a queue worker if none is running and scheduler didn't start one
+            if ($running_queue_workers == 0 && function_exists('shell_exec')) {
                 $queue_work_params = config('app.queue_work_params');
                 if (!is_array($queue_work_params)) {
-                    $queue_work_params = ['--queue' => 'default', '--sleep' => 3, '--tries' => 3];
+                    $queue_work_params = ['--queue' => 'emails,default', '--sleep' => 5, '--tries' => 1, '--timeout' => 1800];
                 }
                 
                 // Add identifier to avoid conflicts 
-                $queue_work_params['--queue'] .= ','.Helper::getWorkerIdentifier();
+                $queue_work_params['--queue'] .= ','.$worker_identifier;
                 
-                // Start queue worker separately
-                if (function_exists('shell_exec') && !count(Helper::getRunningProcesses())) {
-                    $command = 'php '.base_path().'/artisan queue:work';
-                    foreach ($queue_work_params as $key => $value) {
-                        $command .= ' '.$key.'='.$value;
-                    }
-                    $command .= ' > '.storage_path().'/logs/queue-jobs.log 2>&1 &';
-                    shell_exec($command);
-                    $output .= "\nStarted queue worker in background.";
+                // Format command for output
+                $display_command = "Starting queue worker manually: 'php artisan queue:work";
+                foreach ($queue_work_params as $key => $value) {
+                    $display_command .= ' '.$key.'='.$value;
                 }
-            } catch (\Exception $e) {
-                $output .= "\nError starting queue worker: ".$e->getMessage();
+                $output_lines[] = $display_command . "'";
+                
+                // Build the background command
+                $command = 'php '.base_path().'/artisan queue:work';
+                foreach ($queue_work_params as $key => $value) {
+                    $command .= ' '.$key.'='.$value;
+                }
+                $command .= ' > '.storage_path().'/logs/queue-jobs.log 2>&1 &';
+                
+                shell_exec($command);
+                
+                // Update timestamps
+                Option::set('queue_work_last_run', time());
+                Option::set('queue_work_last_successful_run', time());
+                $output_lines[] = "Queue worker started successfully";
             }
         }
 
-        return response($output, 200)->header('Content-Type', 'text/plain');
+        return response(implode("\n", $output_lines), 200)->header('Content-Type', 'text/plain');
     }
 
     /**
@@ -156,7 +194,7 @@ class ApiCommandController extends Controller
     }
     
     /**
-     * Run queue worker directly via API - Matched to system implementation
+     * Run queue worker directly via API - Prevents multiple instances
      */
     public function queueWork(Request $request)
     {
@@ -165,8 +203,60 @@ class ApiCommandController extends Controller
         }
         
         $output = [];
-        $output[] = "Running scheduled commands:";
         
+        // Check if command is already running before starting a new one
+        if (function_exists('shell_exec')) {
+            $worker_identifier = Helper::getWorkerIdentifier();
+            $running_commands = 0;
+            $pids = [];
+            
+            try {
+                $processes = preg_split("/[\r\n]/", Helper::shellExec("ps auxww | grep '{$worker_identifier}'"));
+                foreach ($processes as $process) {
+                    $process = trim($process);
+                    preg_match("/^[\S]+\s+([\d]+)\s+/", $process, $m);
+                    if (empty($m)) {
+                        // Another format (used in Docker image)
+                        preg_match("/^([\d]+)\s+[\S]+\s+/", $process, $m);
+                    }
+                    if (!preg_match("/(sh \-c|grep )/", $process) && !empty($m[1])) {
+                        $running_commands++;
+                        $pids[] = $m[1];
+                    }
+                }
+            } catch (\Exception $e) {
+                // Do nothing
+            }
+            
+            if ($running_commands > 1) {
+                $output[] = "Warning: {$running_commands} queue:work commands are running simultaneously";
+                $output[] = "Restarting queue workers to prevent resource contention...";
+                
+                // Use the same logic as SystemController to restart queue workers
+                Helper::queueWorkerRestart();
+                
+                // Kill existing processes to ensure we start fresh
+                sleep(1); // Give processes time to detect the restart signal
+                
+                // Check if processes are still running after sending restart signal
+                $remaining_pids = Helper::getRunningProcesses($worker_identifier);
+                if (count($remaining_pids) > 0) {
+                    $output[] = "Terminating remaining processes: " . implode(', ', $remaining_pids);
+                    shell_exec('kill ' . implode(' ', $remaining_pids) . ' 2>/dev/null');
+                    sleep(1); // Wait for processes to terminate
+                }
+            } elseif ($running_commands == 1) {
+                $output[] = "One queue:work process already running (PID: " . implode(', ', $pids) . ")";
+                $output[] = "Updating last run timestamps without starting a new process";
+                
+                // Just update timestamps and exit
+                Option::set('queue_work_last_run', time());
+                Option::set('queue_work_last_successful_run', time());
+                
+                return response(implode("\n", $output), 200)->header('Content-Type', 'text/plain');
+            }
+        }
+
         // Get queue parameters from config
         $queue_work_params = config('app.queue_work_params');
         if (!is_array($queue_work_params)) {
@@ -184,9 +274,6 @@ class ApiCommandController extends Controller
         $display_command .= " > '".storage_path()."/logs/queue-jobs.log' 2>&1";
         $output[] = $display_command;
         
-        // Restart queue worker to clear any locks
-        Helper::queueWorkerRestart();
-        
         // Build the background command
         $command = 'php '.base_path().'/artisan queue:work';
         foreach ($queue_work_params as $key => $value) {
@@ -201,6 +288,9 @@ class ApiCommandController extends Controller
             // Set option to record last run time
             Option::set('queue_work_last_run', time());
             Option::set('queue_work_last_successful_run', time());
+            $output[] = "Queue worker started successfully";
+        } else {
+            $output[] = "Error: shell_exec function is disabled, cannot start queue worker";
         }
         
         return response(implode("\n", $output), 200)->header('Content-Type', 'text/plain');
