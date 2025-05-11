@@ -63,23 +63,21 @@ class Webhook extends Model
         $is_slack = strpos($this->url, 'hooks.slack.com') !== false;
         
         // Format the payload specifically for Slack
+        $original_params = null;
         if ($is_slack) {
             // Build a readable message for Slack
             $slack_message = $this->formatSlackMessage($params, $data);
             
             // Slack requires a specific format with a 'text' property
-            $slack_params = ['text' => $slack_message];
-            
-            // Keep the original params for logging
             $original_params = $params;
-            $params = $slack_params;
+            $params = ['text' => $slack_message];
         }
 
         try {
             $options['headers'] = [
                 'Content-Type' => 'application/json',
                 'X-FreeScout-Event' => $event,
-                'X-FreeScout-Signature' => self::sign(json_encode($is_slack ? $original_params ?? $params : $params)),
+                'X-FreeScout-Signature' => self::sign(json_encode($original_params ?: $params)),
             ];
             $options['json'] = $params;
             
@@ -95,7 +93,7 @@ class Webhook extends Model
             $this->save();
 
             // Log the original payload for debugging purposes
-            WebhookLog::add($this, $event, 0, $is_slack ? $original_params ?? $params : $params, $e->getMessage(), $webhook_log_id);
+            WebhookLog::add($this, $event, 0, $original_params ?: $params, $e->getMessage(), $webhook_log_id);
             return false;
         }
 
@@ -110,7 +108,7 @@ class Webhook extends Model
             $this->last_run_error = $error;
             $this->save();
 
-            WebhookLog::add($this, $event, $response->getStatusCode(), $is_slack ? $original_params ?? $params : $params, $error, $webhook_log_id);
+            WebhookLog::add($this, $event, $response->getStatusCode(), $original_params ?: $params, $error, $webhook_log_id);
             return false;
         }
     }
