@@ -53,51 +53,45 @@ class Webhook extends Model
 
         $options = \Helper::setGuzzleDefaultOptions($options);
 
-        //foreach ($data as $key => $entity) {
+        // Format entity for webhook
         $params = \ApiWebhooks::formatEntity($data);
-        //}
 
         $this->last_run_time = date('Y-m-d H:i:s');
-
+        
         // Special handling for Slack webhooks
         $is_slack = strpos($this->url, 'hooks.slack.com') !== false;
         
-        // Format the payload specifically for Slack
-        $original_params = null;
-        if ($is_slack) {
-            // Build a readable message for Slack
-            $slack_message = $this->formatSlackMessage($params, $data);
-            
-            // Slack requires a specific format with a 'text' property
-            $original_params = $params;
-            $params = ['text' => $slack_message];
-        }
-
         try {
+            // Configure headers and content
             $options['headers'] = [
                 'Content-Type' => 'application/json',
                 'X-FreeScout-Event' => $event,
-                'X-FreeScout-Signature' => self::sign(json_encode($original_params ?: $params)),
             ];
-            $options['json'] = $params;
             
-            // Apply general webhook filters (but not for Slack as we've already handled it)
-            if (!$is_slack) {
-                $options = \Eventy::filter('guzzle_options_before_webhook', $options, $this);
+            // For Slack webhooks, format the payload specifically
+            if ($is_slack) {
+                // Create a simple text message for Slack
+                $slack_message = $this->createSlackMessage($params, $data);
+                $options['json'] = ['text' => $slack_message];
+                
+                // Don't include signature for Slack
+            } else {
+                // For all other webhooks, use the standard format with signature
+                $options['json'] = $params;
+                $options['headers']['X-FreeScout-Signature'] = self::sign(json_encode($params));
             }
             
+            // Send the webhook request
             $response = (new \GuzzleHttp\Client())->request('POST', $this->url, $options);
         } catch (\Exception $e) {
-            
             $this->last_run_error = $e->getMessage();
             $this->save();
 
-            // Log the original payload for debugging purposes
-            WebhookLog::add($this, $event, 0, $original_params ?: $params, $e->getMessage(), $webhook_log_id);
+            WebhookLog::add($this, $event, 0, $params, $e->getMessage(), $webhook_log_id);
             return false;
         }
 
-        // https://guzzle3.readthedocs.io/http-client/response.html
+        // Check for success
         if ($response->getStatusCode() >= 200 && $response->getStatusCode() <= 299) {
             $this->last_run_error = '';
             $this->save();
@@ -108,19 +102,19 @@ class Webhook extends Model
             $this->last_run_error = $error;
             $this->save();
 
-            WebhookLog::add($this, $event, $response->getStatusCode(), $original_params ?: $params, $error, $webhook_log_id);
+            WebhookLog::add($this, $event, $response->getStatusCode(), $params, $error, $webhook_log_id);
             return false;
         }
     }
 
     /**
-     * Format payload into a readable Slack message
+     * Create a formatted message for Slack webhooks
      * 
-     * @param array $payload The formatted webhook payload
-     * @param mixed $original The original data object
-     * @return string The formatted message for Slack
+     * @param array $payload The formatted entity data
+     * @param object $original The original data object
+     * @return string The message text for Slack
      */
-    protected function formatSlackMessage($payload, $original = null)
+    protected function createSlackMessage($payload, $original = null)
     {
         $message = '';
         
@@ -184,8 +178,8 @@ class Webhook extends Model
                 }
             } else if ($original instanceof \App\Conversation) {
                 // Try to get threads directly from the conversation object if payload doesn't have them
-                $latestThreads = $original->getThreads()->sortByDesc('created_at')->take(5);
-                foreach ($latestThreads as $thread) {
+                $threads = $original->threads()->orderBy('created_at', 'desc')->take(5)->get();
+                foreach ($threads as $thread) {
                     if ($thread->type != \App\Thread::TYPE_LINEITEM && !empty($thread->body)) {
                         // Strip HTML tags and limit length
                         $body = strip_tags($thread->body);
