@@ -141,53 +141,75 @@ class Webhook extends Model
                 $message .= "*Customer:* {$customer['firstName']} {$customer['lastName']} ({$customer['email']})\n";
             }
             
-            // Add thread content
-            if (isset($payload['_embedded']) && isset($payload['_embedded']['threads']) && !empty($payload['_embedded']['threads'])) {
-                // Get the last thread that's not a lineitem
-                $threads = $payload['_embedded']['threads'];
-                $latestThread = null;
+            // Try to get the latest thread directly from the original conversation object
+            $latestThreadFound = false;
+            
+            // First try: use the original conversation object if available
+            if ($original instanceof \App\Conversation) {
+                $threads = $original->threads()
+                    ->where('type', '!=', \App\Thread::TYPE_LINEITEM)
+                    ->where('body', '!=', '')
+                    ->orderBy('created_at', 'desc')
+                    ->take(1)
+                    ->get();
                 
-                // Find the latest non-lineitem thread (actual message)
-                foreach (array_reverse($threads) as $thread) {
-                    if ($thread['type'] !== 'lineitem' && !empty($thread['body'])) {
-                        $latestThread = $thread;
-                        break;
-                    }
-                }
-                
-                if ($latestThread) {
+                if ($threads && count($threads) > 0) {
+                    $latestThread = $threads[0];
+                    
                     // Strip HTML tags and limit length
-                    $body = strip_tags($latestThread['body']);
+                    $body = strip_tags($latestThread->body);
                     if (strlen($body) > 300) {
                         $body = substr($body, 0, 300) . '...';
                     }
                     
-                    // Add sender information if available
-                    $sender = '';
-                    if (isset($latestThread['createdBy']) && !empty($latestThread['createdBy'])) {
-                        $sender = $latestThread['createdBy']['firstName'] . ' ' . $latestThread['createdBy']['lastName'];
-                        if ($latestThread['createdBy']['type'] === 'user') {
-                            $sender .= ' (Agent)';
-                        } else {
-                            $sender .= ' (Customer)';
+                    // Add sender information
+                    $sender = 'Unknown';
+                    if ($latestThread->created_by_user_id) {
+                        $user = \App\User::find($latestThread->created_by_user_id);
+                        if ($user) {
+                            $sender = $user->first_name . ' ' . $user->last_name . ' (Agent)';
                         }
-                        $message .= "\n*From:* {$sender}\n";
+                    } elseif ($latestThread->created_by_customer_id) {
+                        $customer = \App\Customer::find($latestThread->created_by_customer_id);
+                        if ($customer) {
+                            $sender = $customer->first_name . ' ' . $customer->last_name . ' (Customer)';
+                        }
                     }
                     
+                    $message .= "\n*From:* {$sender}\n";
                     $message .= "*Latest Message:*\n```{$body}```\n";
+                    $latestThreadFound = true;
                 }
-            } else if ($original instanceof \App\Conversation) {
-                // Try to get threads directly from the conversation object if payload doesn't have them
-                $threads = $original->threads()->orderBy('created_at', 'desc')->take(5)->get();
+            }
+            
+            // Second try: use the payload threads if available and no thread found yet
+            if (!$latestThreadFound && isset($payload['_embedded']) && isset($payload['_embedded']['threads']) && !empty($payload['_embedded']['threads'])) {
+                // Copy and reverse threads array to get from newest to oldest
+                $threads = array_reverse($payload['_embedded']['threads']);
+                
+                // Find the first non-lineitem thread with body content
                 foreach ($threads as $thread) {
-                    if ($thread->type != \App\Thread::TYPE_LINEITEM && !empty($thread->body)) {
+                    if ($thread['type'] !== 'lineitem' && !empty($thread['body'])) {
                         // Strip HTML tags and limit length
-                        $body = strip_tags($thread->body);
+                        $body = strip_tags($thread['body']);
                         if (strlen($body) > 300) {
                             $body = substr($body, 0, 300) . '...';
                         }
                         
-                        $message .= "\n*Latest Message:*\n```{$body}```\n";
+                        // Add sender information if available
+                        $sender = 'Unknown';
+                        if (isset($thread['createdBy']) && !empty($thread['createdBy'])) {
+                            $sender = $thread['createdBy']['firstName'] . ' ' . $thread['createdBy']['lastName'];
+                            if ($thread['createdBy']['type'] === 'user') {
+                                $sender .= ' (Agent)';
+                            } else {
+                                $sender .= ' (Customer)';
+                            }
+                        }
+                        
+                        $message .= "\n*From:* {$sender}\n";
+                        $message .= "*Latest Message:*\n```{$body}```\n";
+                        $latestThreadFound = true;
                         break;
                     }
                 }
