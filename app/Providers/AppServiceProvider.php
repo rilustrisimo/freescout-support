@@ -31,101 +31,97 @@ class AppServiceProvider extends ServiceProvider
         \App\Follower::observe(\App\Observers\FollowerObserver::class);
         \Illuminate\Notifications\DatabaseNotification::observe(\App\Observers\DatabaseNotificationObserver::class);
 
-        \Eventy::addFilter('webhook.payload', function($payload, $url) {
-            // Check if the destination is a Slack webhook
-            if (strpos($url, 'hooks.slack.com') !== false) {
-                // Get relevant information from the payload to create a meaningful message
-                $message = $this->formatSlackMessage($payload);
+        // Define the formatSlackMessage function outside the closure to avoid $this scope issues
+        $formatSlackMessage = function($payload) {
+            $message = '';
+            
+            // Conversation-related events
+            if (isset($payload['subject'])) {
+                $message .= "*Conversation:* #{$payload['number']} - {$payload['subject']}\n";
                 
-                // Return the Slack formatted payload
-                return ['text' => $message];
-            }
-            
-            return $payload;
-        }, 20, 2);
-    }
-
-    /**
-     * Format payload into a readable Slack message
-     * 
-     * @param array $payload The original webhook payload
-     * @return string The formatted message for Slack
-     */
-    private function formatSlackMessage($payload)
-    {
-        $message = '';
-        
-        // Conversation-related events
-        if (isset($payload['subject'])) {
-            $message .= "*Conversation:* #{$payload['number']} - {$payload['subject']}\n";
-            
-            // Status info
-            if (isset($payload['status'])) {
-                $message .= "*Status:* {$payload['status']}\n";
-            }
-            
-            // Add assignee info if available
-            if (isset($payload['assignee']) && !empty($payload['assignee'])) {
-                $assignee = $payload['assignee'];
-                $message .= "*Assigned to:* {$assignee['firstName']} {$assignee['lastName']}\n";
-            } else {
-                $message .= "*Assigned to:* Unassigned\n";
-            }
-            
-            // Customer info if available
-            if (isset($payload['customer']) && !empty($payload['customer'])) {
-                $customer = $payload['customer'];
-                $message .= "*Customer:* {$customer['firstName']} {$customer['lastName']} ({$customer['email']})\n";
-            }
-            
-            // Add most recent thread content if available
-            if (isset($payload['_embedded']) && isset($payload['_embedded']['threads']) && !empty($payload['_embedded']['threads'])) {
-                $latestThread = end($payload['_embedded']['threads']);
-                if (!empty($latestThread['body'])) {
-                    // Strip HTML tags and limit length
-                    $body = strip_tags($latestThread['body']);
-                    if (strlen($body) > 300) {
-                        $body = substr($body, 0, 300) . '...';
+                // Status info
+                if (isset($payload['status'])) {
+                    $message .= "*Status:* {$payload['status']}\n";
+                }
+                
+                // Add assignee info if available
+                if (isset($payload['assignee']) && !empty($payload['assignee'])) {
+                    $assignee = $payload['assignee'];
+                    $message .= "*Assigned to:* {$assignee['firstName']} {$assignee['lastName']}\n";
+                } else {
+                    $message .= "*Assigned to:* Unassigned\n";
+                }
+                
+                // Customer info if available
+                if (isset($payload['customer']) && !empty($payload['customer'])) {
+                    $customer = $payload['customer'];
+                    $message .= "*Customer:* {$customer['firstName']} {$customer['lastName']} ({$customer['email']})\n";
+                }
+                
+                // Add most recent thread content if available
+                if (isset($payload['_embedded']) && isset($payload['_embedded']['threads']) && !empty($payload['_embedded']['threads'])) {
+                    $latestThread = end($payload['_embedded']['threads']);
+                    if (!empty($latestThread['body'])) {
+                        // Strip HTML tags and limit length
+                        $body = strip_tags($latestThread['body']);
+                        if (strlen($body) > 300) {
+                            $body = substr($body, 0, 300) . '...';
+                        }
+                        $message .= "\n*Latest Message:*\n```{$body}```\n";
                     }
-                    $message .= "\n*Latest Message:*\n```{$body}```\n";
+                }
+                
+                // Add link to conversation (if you have a base URL for your helpdesk)
+                $baseUrl = config('app.url');
+                if ($baseUrl) {
+                    $message .= "\n<{$baseUrl}/conversation/{$payload['number']}|View Conversation>";
+                }
+            } 
+            // Customer-related events
+            else if (isset($payload['firstName']) && isset($payload['_embedded']) && isset($payload['_embedded']['emails'])) {
+                $message .= "*Customer:* {$payload['firstName']} {$payload['lastName']}\n";
+                
+                if (!empty($payload['_embedded']['emails'])) {
+                    $email = $payload['_embedded']['emails'][0]['value'] ?? 'No email';
+                    $message .= "*Email:* {$email}\n";
+                }
+                
+                if (!empty($payload['company'])) {
+                    $message .= "*Company:* {$payload['company']}\n";
+                }
+                
+                $baseUrl = config('app.url');
+                if ($baseUrl && isset($payload['id'])) {
+                    $message .= "\n<{$baseUrl}/customer/{$payload['id']}|View Customer>";
+                }
+            } 
+            // Generic fallback
+            else {
+                $message = "New event from FreeScout";
+                
+                // Try to add details about what triggered the event
+                if (isset($payload['id'])) {
+                    $message .= " (ID: {$payload['id']})";
                 }
             }
             
-            // Add link to conversation (if you have a base URL for your helpdesk)
-            $baseUrl = config('app.url');
-            if ($baseUrl) {
-                $message .= "\n<{$baseUrl}/conversation/{$payload['number']}|View Conversation>";
-            }
-        } 
-        // Customer-related events
-        else if (isset($payload['firstName']) && isset($payload['_embedded']) && isset($payload['_embedded']['emails'])) {
-            $message .= "*Customer:* {$payload['firstName']} {$payload['lastName']}\n";
-            
-            if (!empty($payload['_embedded']['emails'])) {
-                $email = $payload['_embedded']['emails'][0]['value'] ?? 'No email';
-                $message .= "*Email:* {$email}\n";
-            }
-            
-            if (!empty($payload['company'])) {
-                $message .= "*Company:* {$payload['company']}\n";
+            return $message;
+        };
+
+        // Custom hook to modify webhook output for Slack
+        \Eventy::addFilter('guzzle_options_before_webhook', function($options, $webhook) use ($formatSlackMessage) {
+            // Check if the destination is a Slack webhook
+            if (strpos($webhook->url, 'hooks.slack.com') !== false) {
+                // Format a message for Slack based on the original payload
+                $payload = $options['json'] ?? [];
+                $message = $formatSlackMessage($payload);
+                
+                // Replace the entire payload with Slack's expected format
+                $options['json'] = ['text' => $message];
             }
             
-            $baseUrl = config('app.url');
-            if ($baseUrl && isset($payload['id'])) {
-                $message .= "\n<{$baseUrl}/customer/{$payload['id']}|View Customer>";
-            }
-        } 
-        // Generic fallback
-        else {
-            $message = "New event from FreeScout";
-            
-            // Try to add details about what triggered the event
-            if (isset($payload['id'])) {
-                $message .= " (ID: {$payload['id']})";
-            }
-        }
-        
-        return $message;
+            return $options;
+        }, 20, 2);
     }
 
     /**
