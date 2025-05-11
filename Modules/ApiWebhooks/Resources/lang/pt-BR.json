@@ -1,0 +1,23 @@
+{
+    "API Documentation": "Documentação da API",
+    "API Key": "Chave da API",
+    "Add Webhook": "Adicionar Webhook",
+    "All (default)": "Todos (padrão)",
+    "Allowed CORS Hosts": "Hosts CORS permitidos",
+    "Date & Event": "Data e Evento",
+    "Delete this webhook?": "Excluir este webhook?",
+    "Error": "Erro",
+    "Error Log": "Registro de erros",
+    "Events": "Eventos",
+    "Examples": "Exemplos",
+    "No logs found.": "Nenhum registro encontrado.",
+    "Regenerate": "Regenerar",
+    "Specify 'Access-Control-Allow-Origin' header value to allow access to the API from JavaScript.": "Especifique o valor do cabeçalho 'Access-Control-Allow-Origin' para permitir acesso à API a partir do JavaScript.",
+    "Trigger Webhook": "Acionar Webhook",
+    "Webhook Error Log": "Registro de erros do Webhook",
+    "Webhook added": "Webhook adicionado",
+    "Webhook deleted": "Webhook excluído",
+    "Webhook not found": "Webhook não encontrado",
+    "Webhook updated": "Webhook atualizado",
+    "any host": "qualquer host"
+}

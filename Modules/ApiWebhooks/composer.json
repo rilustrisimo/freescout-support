@@ -1,0 +1,52 @@
+{
+    "name": "freescout/apiwebhooks",
+    "description": "",
+    "authors": [
+        {
+            "name": "FreeScout",
+            "email": "support@freescout.net"
+        }
+    ],
+    "require": {
+        "mpociot/laravel-apidoc-generator": "3.15.0"
+    },
+    "replace": {
+        "illuminate/support": "*",
+        "illuminate/console": "*",
+        "illuminate/contracts": "*",
+        "illuminate/filesystem": "*",
+        "illuminate/container": "*",
+        "illuminate/events": "*",
+        "illuminate/view": "*",
+        "illuminate/session": "*",
+        "illuminate/pipeline": "*",
+        "illuminate/http": "*",
+        "illuminate/routing": "*",
+        "league/flysystem": "*",
+        "psr/container": "*",
+        "psr/simple-cache": "*",
+        "ramsey/uuid": "*",
+        "symfony/debug": "*",
+        "symfony/finder": "*",
+        "symfony/console": "*",
+        "symfony/routing": "*",
+        "symfony/http-foundation": "*",
+        "symfony/event-dispatcher": "*",
+        "symfony/http-kernel": "*"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Modules\\ApiWebhooks\\Providers\\ApiWebhooksServiceProvider"
+            ],
+            "aliases": {
+                
+            }
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "Modules\\ApiWebhooks\\": ""
+        }
+    }
+}

@@ -1,0 +1,21 @@
+{
+    "API & Webhooks": "API & Webhooks",
+    "API Documentation": "API dokumentation",
+    "API Key": "API Nøgle",
+    "Add Webhook": "Tilføj Webhook",
+    "Allowed CORS Hosts": "Tilladte CORS værter",
+    "Date & Event": "Dato & Hændelse",
+    "Delete this webhook?": "Slet denne webhook?",
+    "Error": "Fejl",
+    "Events": "Hændelser",
+    "Examples": "Eksempler",
+    "No logs found.": "Ingen logs fundet.",
+    "Secret Key": "Hemmelig nøgle",
+    "URL": "URL",
+    "Webhook added": "Webhook tilføjet",
+    "Webhook deleted": "Webhook slettet",
+    "Webhook not found": "Webhook ikke fundet",
+    "Webhook updated": "Webhook opdateret",
+    "Webhooks": "Webhooks",
+    "any host": "enhver vært"
+}
