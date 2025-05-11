@@ -59,56 +59,183 @@ class Webhook extends Model
 
         $this->last_run_time = date('Y-m-d H:i:s');
 
+        // Special handling for Slack webhooks
+        $is_slack = strpos($this->url, 'hooks.slack.com') !== false;
+        
+        // Format the payload specifically for Slack
+        if ($is_slack) {
+            // Build a readable message for Slack
+            $slack_message = $this->formatSlackMessage($params, $data);
+            
+            // Slack requires a specific format with a 'text' property
+            $slack_params = ['text' => $slack_message];
+            
+            // Keep the original params for logging
+            $original_params = $params;
+            $params = $slack_params;
+        }
+
         try {
             $options['headers'] = [
                 'Content-Type' => 'application/json',
                 'X-FreeScout-Event' => $event,
-                'X-FreeScout-Signature' => self::sign(json_encode($params)),
+                'X-FreeScout-Signature' => self::sign(json_encode($is_slack ? $original_params ?? $params : $params)),
             ];
             $options['json'] = $params;
             
-            // Apply our filter to modify options for specific destinations (e.g., Slack)
-            $options = \Eventy::filter('guzzle_options_before_webhook', $options, $this);
+            // Apply general webhook filters (but not for Slack as we've already handled it)
+            if (!$is_slack) {
+                $options = \Eventy::filter('guzzle_options_before_webhook', $options, $this);
+            }
             
             $response = (new \GuzzleHttp\Client())->request('POST', $this->url, $options);
         } catch (\Exception $e) {
             
-            //if (!$webhook_log_id) {
-                $this->last_run_error = $e->getMessage();
-                $this->save();
-            //}
+            $this->last_run_error = $e->getMessage();
+            $this->save();
 
-            WebhookLog::add($this, $event, 0, $params, $e->getMessage(), $webhook_log_id);
+            // Log the original payload for debugging purposes
+            WebhookLog::add($this, $event, 0, $is_slack ? $original_params ?? $params : $params, $e->getMessage(), $webhook_log_id);
             return false;
         }
 
         // https://guzzle3.readthedocs.io/http-client/response.html
         if ($response->getStatusCode() >= 200 && $response->getStatusCode() <= 299) {
-
             $this->last_run_error = '';
             $this->save();
             
             return true;
         } else {
             $error = 'Response status code: '.$response->getStatusCode();
-            //if (!$webhook_log_id) {
-                $this->last_run_error = $error;
-                $this->save();
-            //}
+            $this->last_run_error = $error;
+            $this->save();
 
-            WebhookLog::add($this, $event, $response->getStatusCode(), $params, $error, $webhook_log_id);
+            WebhookLog::add($this, $event, $response->getStatusCode(), $is_slack ? $original_params ?? $params : $params, $error, $webhook_log_id);
             return false;
         }
     }
 
-    public static function sign($data)
+    /**
+     * Format payload into a readable Slack message
+     * 
+     * @param array $payload The formatted webhook payload
+     * @param mixed $original The original data object
+     * @return string The formatted message for Slack
+     */
+    protected function formatSlackMessage($payload, $original = null)
     {
-        if (!function_exists('hash_hmac')) {
-            \Log::error('Could not sign webhook request. Please install "hash" extension in your PHP.');
-            return '';
+        $message = '';
+        
+        // Handle conversation related events
+        if (isset($payload['subject'])) {
+            $message .= "*Conversation:* #{$payload['number']} - {$payload['subject']}\n";
+            
+            // Status info
+            if (isset($payload['status'])) {
+                $message .= "*Status:* {$payload['status']}\n";
+            }
+            
+            // Add assignee info if available
+            if (isset($payload['assignee']) && !empty($payload['assignee'])) {
+                $assignee = $payload['assignee'];
+                $message .= "*Assigned to:* {$assignee['firstName']} {$assignee['lastName']}\n";
+            } else {
+                $message .= "*Assigned to:* Unassigned\n";
+            }
+            
+            // Customer info if available
+            if (isset($payload['customer']) && !empty($payload['customer'])) {
+                $customer = $payload['customer'];
+                $message .= "*Customer:* {$customer['firstName']} {$customer['lastName']} ({$customer['email']})\n";
+            }
+            
+            // Add thread content
+            if (isset($payload['_embedded']) && isset($payload['_embedded']['threads']) && !empty($payload['_embedded']['threads'])) {
+                // Get the last thread that's not a lineitem
+                $threads = $payload['_embedded']['threads'];
+                $latestThread = null;
+                
+                // Find the latest non-lineitem thread (actual message)
+                foreach (array_reverse($threads) as $thread) {
+                    if ($thread['type'] !== 'lineitem' && !empty($thread['body'])) {
+                        $latestThread = $thread;
+                        break;
+                    }
+                }
+                
+                if ($latestThread) {
+                    // Strip HTML tags and limit length
+                    $body = strip_tags($latestThread['body']);
+                    if (strlen($body) > 300) {
+                        $body = substr($body, 0, 300) . '...';
+                    }
+                    
+                    // Add sender information if available
+                    $sender = '';
+                    if (isset($latestThread['createdBy']) && !empty($latestThread['createdBy'])) {
+                        $sender = $latestThread['createdBy']['firstName'] . ' ' . $latestThread['createdBy']['lastName'];
+                        if ($latestThread['createdBy']['type'] === 'user') {
+                            $sender .= ' (Agent)';
+                        } else {
+                            $sender .= ' (Customer)';
+                        }
+                        $message .= "\n*From:* {$sender}\n";
+                    }
+                    
+                    $message .= "*Latest Message:*\n```{$body}```\n";
+                }
+            } else if ($original instanceof \App\Conversation) {
+                // Try to get threads directly from the conversation object if payload doesn't have them
+                $latestThreads = $original->getThreads()->sortByDesc('created_at')->take(5);
+                foreach ($latestThreads as $thread) {
+                    if ($thread->type != \App\Thread::TYPE_LINEITEM && !empty($thread->body)) {
+                        // Strip HTML tags and limit length
+                        $body = strip_tags($thread->body);
+                        if (strlen($body) > 300) {
+                            $body = substr($body, 0, 300) . '...';
+                        }
+                        
+                        $message .= "\n*Latest Message:*\n```{$body}```\n";
+                        break;
+                    }
+                }
+            }
+            
+            // Add link to conversation
+            $baseUrl = config('app.url');
+            if ($baseUrl) {
+                $message .= "\n<{$baseUrl}/conversation/{$payload['number']}|View Conversation>";
+            }
+        } 
+        // Customer-related events
+        else if (isset($payload['firstName']) && isset($payload['_embedded']) && isset($payload['_embedded']['emails'])) {
+            $message .= "*Customer:* {$payload['firstName']} {$payload['lastName']}\n";
+            
+            if (!empty($payload['_embedded']['emails'])) {
+                $email = $payload['_embedded']['emails'][0]['value'] ?? 'No email';
+                $message .= "*Email:* {$email}\n";
+            }
+            
+            if (!empty($payload['company'])) {
+                $message .= "*Company:* {$payload['company']}\n";
+            }
+            
+            $baseUrl = config('app.url');
+            if ($baseUrl && isset($payload['id'])) {
+                $message .= "\n<{$baseUrl}/customer/{$payload['id']}|View Customer>";
+            }
+        } 
+        // Generic fallback
+        else {
+            $message = "New event from FreeScout";
+            
+            // Try to add details about what triggered the event
+            if (isset($payload['id'])) {
+                $message .= " (ID: {$payload['id']})";
+            }
         }
         
-        return base64_encode(hash_hmac('sha1', $data, self::getSecretKey(), true));
+        return $message;
     }
 
     public static function create($data)
