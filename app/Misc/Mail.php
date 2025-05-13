@@ -742,20 +742,7 @@ class Mail
     public static function getMailboxClient($mailbox)
     {
         $oauth = $mailbox->oauthEnabled();
-        /*$new_library = config('app.new_fetching_library');
-
-        if (!$new_library) {
-            // Old.
-            return new \Webklex\IMAP\Client([
-                'host'          => $mailbox->in_server,
-                'port'          => $mailbox->in_port,
-                'encryption'    => $mailbox->getInEncryptionName(),
-                'validate_cert' => $mailbox->in_validate_cert,
-                'username'      => $mailbox->in_username,
-                'password'      => $mailbox->in_password,
-                'protocol'      => $mailbox->getInProtocolName(),
-            ]);
-        } else {*/
+        
         // New
         if ($oauth) {
             \Config::set('imap.accounts.default', [
@@ -774,10 +761,6 @@ class Mail
                 'port'          => $mailbox->in_port,
                 'encryption'    => $mailbox->getInEncryptionName(),
                 'validate_cert' => $mailbox->in_validate_cert,
-                // 'username'      => $mailbox->email,
-                // 'password'      => $mailbox->oauthGetParam('a_token'),
-                // 'protocol'      => $mailbox->getInProtocolName(),
-                // 'authentication' => 'oauth',
                 'username'      => $mailbox->in_username,
                 'password'      => $mailbox->in_password,
                 'protocol'      => $mailbox->getInProtocolName(),
@@ -815,11 +798,7 @@ class Mail
             }
         }
 
-        // This makes it authenticate two times.
-        //$cm->setTimeout(60);
-
         return $cm->account('default');
-        //}
     }
 
     /**
@@ -1128,7 +1107,7 @@ class Mail
                     }
 
                     // Try imap_utf8().
-                    // =?iso-2022-jp?B?IBskQiFaSEcyPDpuQ?= =?iso-2022-jp?B?C4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
+                    // =?iso-2022-jp?B? IBskQiFaSEcyPDpuQ?= =?iso-2022-jp?B?C4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
                     $subject_decoded = self::imapUtf8($joined_parts);
 
                     if ($subject_decoded 
@@ -1145,11 +1124,11 @@ class Mail
         // Step 2. Standard way - each part is encoded separately.
 
         // iconv_mime_decode() can't decode:
-        // =?iso-2022-jp?B?IBskQiFaSEcyPDpuQC4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
+        // =?iso-2022-jp?B? IBskQiFaSEcyPDpuQC4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
         $subject_decoded = iconv_mime_decode($subject, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, "UTF-8");
 
         // Sometimes iconv_mime_decode() can't decode some parts of the subject:
-        // =?iso-2022-jp?B?IBskQiFaSEcyPDpuQC4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
+        // =?iso-2022-jp?B? IBskQiFaSEcyPDpuQC4wTU1qIVs3Mkp2JSIlLyU3JSItahsoQg==?=
         // =?iso-2022-jp?B?GyRCQGlNVTtZRTkhIT4uTlMbKEI=?=
         if (self::isNotYetFullyDecoded($subject_decoded)) {
             $subject_decoded = self::imapUtf8($subject);
